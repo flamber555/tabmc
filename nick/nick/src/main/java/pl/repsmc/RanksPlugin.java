@@ -2,10 +2,10 @@ package pl.repsmc;
 
 import java.util.UUID;
 import net.luckperms.api.LuckPerms;
+import net.luckperms.api.cacheddata.CachedMetaData;
 import net.luckperms.api.event.EventSubscription;
 import net.luckperms.api.event.user.UserDataRecalculateEvent;
 import net.luckperms.api.model.user.User;
-import net.luckperms.api.cacheddata.CachedMetaData;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
@@ -22,6 +22,7 @@ public class RanksPlugin extends JavaPlugin implements Listener {
 
     private LuckPerms luckPerms;
     private EventSubscription<UserDataRecalculateEvent> luckPermsSubscription;
+    private Scoreboard mainScoreboard;
 
     @Override
     public void onEnable() {
@@ -34,6 +35,10 @@ public class RanksPlugin extends JavaPlugin implements Listener {
         }
 
         luckPerms = provider.getProvider();
+        mainScoreboard = resolveMainScoreboard();
+        if (mainScoreboard == null) {
+            return;
+        }
         getServer().getPluginManager().registerEvents(this, this);
 
         luckPermsSubscription = luckPerms.getEventBus().subscribe(
@@ -57,7 +62,10 @@ public class RanksPlugin extends JavaPlugin implements Listener {
     public void onDisable() {
         if (luckPermsSubscription != null) {
             luckPermsSubscription.close();
+            luckPermsSubscription = null;
         }
+
+        cleanupTeams();
     }
 
     @EventHandler
@@ -68,8 +76,10 @@ public class RanksPlugin extends JavaPlugin implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
-        Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
-        Team team = scoreboard.getTeam(getTeamName(player.getUniqueId()));
+        if (mainScoreboard == null) {
+            return;
+        }
+        Team team = mainScoreboard.getTeam(getTeamName(player.getUniqueId()));
         if (team != null) {
             team.removeEntry(player.getName());
             if (team.getEntries().isEmpty()) {
@@ -79,6 +89,10 @@ public class RanksPlugin extends JavaPlugin implements Listener {
     }
 
     private void updateNameTag(Player player) {
+        if (mainScoreboard == null && resolveMainScoreboard() == null) {
+            return;
+        }
+
         User user = luckPerms.getUserManager().getUser(player.getUniqueId());
         if (user != null) {
             applyNameTag(player, user);
@@ -99,16 +113,48 @@ public class RanksPlugin extends JavaPlugin implements Listener {
         String prefix = translate(meta.getPrefix());
         String suffix = translate(meta.getSuffix());
 
-        Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
+        if (mainScoreboard == null && resolveMainScoreboard() == null) {
+            return;
+        }
+
         String teamName = getTeamName(player.getUniqueId());
-        Team team = scoreboard.getTeam(teamName);
+        Team team = mainScoreboard.getTeam(teamName);
         if (team == null) {
-            team = scoreboard.registerNewTeam(teamName);
+            team = mainScoreboard.registerNewTeam(teamName);
         }
 
         team.setPrefix(limit(prefix, 64));
         team.setSuffix(limit(suffix, 64));
         team.addEntry(player.getName());
+
+        player.setScoreboard(mainScoreboard);
+    }
+
+    private Scoreboard resolveMainScoreboard() {
+        if (mainScoreboard != null) {
+            return mainScoreboard;
+        }
+
+        if (Bukkit.getScoreboardManager() == null) {
+            getLogger().severe("Scoreboard manager unavailable. Disabling plugin.");
+            getServer().getPluginManager().disablePlugin(this);
+            return null;
+        }
+
+        mainScoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
+        return mainScoreboard;
+    }
+
+    private void cleanupTeams() {
+        if (mainScoreboard == null) {
+            return;
+        }
+
+        for (Team team : mainScoreboard.getTeams()) {
+            if (team.getName().startsWith("nick")) {
+                team.unregister();
+            }
+        }
     }
 
     private static String translate(String value) {

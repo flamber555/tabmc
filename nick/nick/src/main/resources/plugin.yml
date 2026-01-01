@@ -1,5 +1,6 @@
-name: Nick
+name: Ranks
 main: pl.repsmc.RanksPlugin
 version: 1.0.0
 api-version: 1.20
 depend: [LuckPerms]
+description: "Pokazuje prefixy LuckPerms nad głową gracza"
